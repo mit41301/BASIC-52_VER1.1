@@ -46,11 +46,8 @@ with other variants of the MCS-51
 series BASIC controllers to obtain
 possibly other versions of 52-BASIC.
 
-sq
+sq  
+
 BASIC-52 code is Freeware.
 This software is not supported by Intel 
 or Warranteed in any way.
-
-
-
-
