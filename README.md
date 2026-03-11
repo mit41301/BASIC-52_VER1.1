@@ -48,6 +48,10 @@ possibly other versions of 52-BASIC.
 
 sq  
 
-BASIC-52 code is Freeware.
-This software is not supported by Intel 
-or Warranteed in any way.
+BASIC-52 code is Freeware.  
+This software is not supported by Intel or Warranteed in any way.  
+
+https://web.mit.edu/6.121/www/other/basic_man/start.html
+
+
+
