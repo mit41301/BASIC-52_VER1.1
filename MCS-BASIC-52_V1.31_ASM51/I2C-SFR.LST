@@ -1,0 +1,808 @@
+I2C-SFR                                                                                                       PAGE 1
+
+                       1    $MOD52
+                       2    ;****************************************************************************
+                       3    ;*                        BASIC-52 V1.31 enhancements                       *
+                       4    ;*          The following code enhanced BASIC-52 with new commands          *
+                       5    ;*               for I2C communicatin and read / write to SFR               *
+                       6    ;*--------------------------------------------------------------------------*
+                       7    ;* (C) H.-J. Boehling & D. Wulf 14.11.01                                    *
+                       8    ;*     http://home.arcor.de/h.boehling                                      *
+                       9    ;*     H-Boehling@gmx.de                                                    *
+                      10    ;****************************************************************************
+                      11    ;*
+                      12    ;* Four new I2C communication commands as I2C-bus master.
+                      13    ;*
+                      14    ;* The syntax to use is:
+                      15    ;*
+                      16    ;*     I2CSTART           Sends a start condition to I2C bus.
+                      17    ;*                        - Returns with busy, time out or status clear.  
+                      18    ;*     I2CSTOP            Sends a stop condition to I2C bus.
+                      19    ;*                        - Returns with time out or status clear.
+                      20    ;*     I2CPUT [byte]      Sends a byte to the I2C bus.
+                      21    ;*                        - Returns with time out, no acknowledge or clear.
+                      22    ;*     I2CGET [variable]  Reads a byte from I2C to a BASIC variable.
+                      23    ;*                        - Set 18H (status) to 1 to send no acknowledge:
+                      24    ;*                           DBY(18H) = 1 : I2CGET B : I2CSTOP : PRINT B
+                      25    ;*                        - Returns with time out or status clear. 
+                      26    ;*   
+                      27    ;* Register 18H is the I2C communication status register; useage is:
+                      28    ;*
+                      29    ;*     STATUS=DBY(18H)
+                      30    ;*      IF STATUS.AND.2=2 PRINT "Time out error!"
+                      31    ;*      IF STATUS.AND.4=4 PRINT "Busy error!"
+                      32    ;*      IF STATUS.AND.8=8 PRINT "No acknowlege error!"
+                      33    ;*
+                      34    ;*---------------------------------------------------------------------------
+                      35    ;*
+                      36    ;* Two new commands to read from or write to a special funkton register:
+                      37    ;*
+                      38    ;*     WRSFR ([address]) [byte]      Writes to a special funkton register.
+                      39    ;*
+                      40    ;*     RDSFR ([address]) [variable]  Reads from a special funkton register.
+                      41    ;*
+                      42    ;* [address] is the address of the SFR and had to be a value between 
+                      43    ;* 128 (080H) and 255 (0FFH).
+                      44    ;*
+                      45    ;****************************************************************************
+                      46    
+                      47    ;----- Definitions ----------------------------------------------------------
+                      48    
+  0096                49    SDA             bit     P1.6                    ;I2C serial data line.
+  0095                50    SCL             bit     P1.5                    ;I2C serial clock line.
+                      51    
+  0018                52    status          equ     018H                    ;Communication status.
+                      53    
+  000B                54    temp1           equ     11                      ;Temp. storage.
+                      55    
+  002D                56    xbit            bit     45                      ;Command extension present.
+                      57     
+                      58    ; the following bits will be set in the status byte:
+I2C-SFR                                                                                                       PAGE 2
+
+                      59    
+  0002                60    tout            equ     00000010B               ;I2C time out status.
+  0004                61    busy            equ     00000100B               ;I2C bus busy status.
+  0008                62    nack            equ     00001000B               ;Slave sends no acknowledge.
+                      63                                                    
+                      64    ;----------------------------------------------------------------------------
+                      65    ; The following code is necessary to notify the new statements to BASIC.
+                      66    
+2002                  67                    org     2002H                   ;5Ah at 2002h tells BASIC-52
+2002 5A               68                    db      5AH                     ;to call 2048h (see below).
+2048                  69                    org     2048H                   ;Set bit 45 to tell BASIC-52
+                      70                                                    ;that custom commands or
+2048 D22D             71                    setb    xbit                    ;instructions have been
+204A 22               72                    ret                             ;added.
+2070                  73                    org     2070H                   ;Store starting address of
+2070 902400           74                    mov     dptr,#vectortable       ;vector table.
+2073 22               75                    ret
+2078                  76                    org     2078H                   ;Store starting address of
+2078 90240C           77                    mov     dptr,#tokentable        ;token table.
+207B 22               78                    ret
+                      79    
+                      80    ; The old code for BASIC-52 V1.3 overwrite 2090H, but this address had to be
+                      81    ; used for a user reset routine! So the code now starts at here:
+                      82    
+                      83    ;===== Here starts the code for the new BASIC statements ====================
+                      84    
+2400                  85                    org     2400h                   ;use any available address
+                      86    
+2400                  87    vectortable:                                    ;Vector table starts here.
+                      88                                                    ;Label to branch on:
+2400 2440             89                    dw      i2cstart                ;I2CSTART command
+2402 2456             90                    dw      i2cstop                 ;I2CSTOP command
+2404 2462             91                    dw      i2cput                  ;I2CPUT command
+2406 2492             92                    dw      i2cget                  ;I2CGET command
+2408 2541             93                    dw      wrsfr                   ;WRSFR command
+240A 2519             94                    dw      rdsfr                   ;RDSFR command
+                      95    
+240C                  96    tokentable:                                     ;Token table starts here.
+240C 10               97                    db      10H                     ;1. user defined token for
+240D 49324353         98                    db      'I2CSTART'              ;command name.
+2411 54415254   
+2415 00               99                    db      0                       ;End of token indicator
+2416 11              100                    db      11H                     ;2.
+2417 49324353        101                    db      'I2CSTOP'
+241B 544F50     
+241E 00              102                    db      0
+241F 12              103                    db      12H                     ;3.
+2420 49324350        104                    db      'I2CPUT'
+2424 5554       
+2426 00              105                    db      0
+2427 13              106                    db      13H                     ;4.
+2428 49324347        107                    db      'I2CGET'
+242C 4554       
+242E 00              108                    db      0
+242F 14              109                    db      14H                     ;5.
+2430 57525346        110                    db      'WRSFR'
+2434 52         
+2435 00              111                    db      0
+I2C-SFR                                                                                                       PAGE 3
+
+2436 15              112                    db      15H                     ;6.
+2437 52445346        113                    db      'RDSFR'
+243B 52         
+243C 00              114                    db      0
+                     115    
+                     116    ;----- The following is necessary to get no problem with variable names -----
+                     117    
+243D DF              118                    db      0DFH                    ;Dummy token.
+243E 7F              119                    db      07FH                    ;Unused dummy char.
+                     120    
+                     121    ;----------------------------------------------------------------------------
+                     122    
+243F FF              123                    db      0FFH                    ;End of tokenlist indicator.
+                     124    
+                     125    ;----------------------------------------------------------------------------
+                     126    
+                     127    ;===== i2cstart - sends an I2C start condition to beginn communication ======
+                     128    
+2440 1224BA          129    i2cstart:       call    SCLhigh                 ;Set SCL to high.
+2443 7F04            130                    mov     R7,#4                   ;Load time out counter.
+2445 D296            131    setSDA:         setb    SDA                     ;Set SDA to high.
+2447 209606          132                    jb      SDA,ishigh              ;If not high bus is busy.
+244A DFF9            133                    djnz    R7,setSDA               ;If not try until R7 is zero.
+244C 431804          134                    orl     status,#busy            ;Set busy status.
+244F 22              135                    ret                             ;return to BASIC.
+                     136    
+2450 C296            137    ishigh:         clr     SDA                     ;Set start condition.
+2452 531800          138                    anl     status,#0               ;Clear I2C status.
+2455 22              139                    ret                             ;return to BASIC.
+                     140    
+                     141    ;===== i2cstop - sends an I2C stop condition to end communication ===========
+                     142    
+2456 531800          143    i2cstop:        anl     status,#0               ;Clear I2C status.
+2459 C296            144                    clr     SDA                     ;Get SDA ready for stop.
+245B 91BA            145                    acall   SCLhigh                 ;Set clock for stop.
+245D 91B9            146                    acall   delay                   ;Delay 4 machine cycles.
+245F D296            147                    setb    SDA                     ;Set stop condition.
+2461 22              148                    ret                             ;Return to BASIC.
+                     149    
+                     150    ;===== i2cput - sends a byte from a BASIC value out to the I2C bus ==========
+                     151    
+                     152    ;----- Get value and test for 8 bit only ------------------------------------
+                     153    
+2462 7439            154    i2cput:         mov     A,#39H                  ;Put value to send on
+2464 120030          155                    lcall   30H                     ;argument stack.
+2467 7401            156                    mov     A,#1                    ;change value to 16 bit
+2469 120030          157                    lcall   30H                     ;integer and write to R3:R1
+246C BB0058          158                    cjne    R3,#0,i2cerror          ;If R3 not zero then 
+                     159                                                    ;value bigger than 0FFH.
+                     160                                                    ;8 bit integer only error.
+                     161    
+                     162    ;----- Send byte to I2C bus -------------------------------------------------
+                     163    
+246F E9              164                    mov     A,R1                    ;Load byte to send.
+2470 7E08            165                    mov     R6,#8                   ;Load bit counter
+2472 C295            166    send:           clr     SCL                     ;Make clock low
+2474 91B9            167                    acall   delay                   ;Delay 4 machine cycles.
+2476 33              168                    rlc     A                       ;Rotate data bit to C.
+I2C-SFR                                                                                                       PAGE 4
+
+2477 9296            169                    mov     SDA,C                   ;Put data bit on pin.
+2479 91BA            170                    acall   SCLhigh                 ;Send clock.
+247B 91B9            171                    acall   delay                   ;Delay 4 machine cycles.
+247D DEF3            172                    djnz    R6,send                 ;Repeat until all bits sent.
+                     173    
+                     174    ;----- Read acknowledge from slave ------------------------------------------
+                     175            
+247F C295            176                    clr     SCL                     ;Make clock low.
+2481 91B9            177                    acall   delay                   ;Delay 4 machine cycles.
+2483 D296            178                    setb    SDA                     ;Release line for acknowledge.
+2485 91BA            179                    acall   SCLhigh                 ;Send clock for acknowlege.
+2487 91B9            180                    acall   delay                   ;Delay 4 machine cycles.
+2489 309603          181                    jnb     SDA,ackok               ;Check for valid acknowledge.
+248C 431808          182                    orl     status,#nack            ;Set no acknowledge status.
+248F C295            183    ackok:          clr     SCL                     ;Finish acknowledge bit.
+2491 22              184                    ret                             ;Return to BASIC.
+                     185    
+                     186    ;===== i2cget - Reads one byte from I2C bus to the argument stack ===========
+                     187    
+2492 7E08            188    i2cget:         mov     R6,#8                   ;Load bit counter
+2494 C295            189    read:           clr     SCL                     ;Make clock low.
+2496 91B9            190                    acall   delay                   ;Delay 4 machine cycles.
+2498 91BA            191                    acall   SCLhigh                 ;Send clock.
+249A 91B9            192                    acall   delay                   ;Delay 4 machine cycles.
+249C A296            193                    mov     C,SDA                   ;Get data bit from pin.
+249E 33              194                    rlc     A                       ;Rotate bit into result byte.
+249F DEF3            195                    djnz    R6,read                 ;Repeat until all received.
+                     196    
+                     197    ;----- Put received byte on argument stack ----------------------------------
+                     198    
+24A1 F8              199                    mov     R0,A                    ;Load R0 with reseived byte.
+24A2 7A00            200                    mov     R2,#0                   ;Set high byte to zero.
+24A4 749A            201                    mov     A,#9AH                  ;Put byte on argument stack
+24A6 120030          202                    lcall   30H                     ;with BASIC funktion.
+                     203    
+                     204    ;----- Send acknowledge to slave --------------------------------------------
+                     205    
+24A9 C295            206                    clr     SCL                     ;Set clock low.
+24AB 91B9            207                    acall   delay                   ;Delay 4 machine cycles.
+24AD E518            208                    mov     A,status                ;Load acknowledge bit
+24AF 13              209                    rrc     A                       ;into C and
+24B0 9296            210                    mov     SDA,C                   ;send acknowledge bit.
+24B2 91BA            211                    acall   SCLhigh                 ;Send acknowledge clock.
+                     212    
+                     213    ;----- Set variable to received byte ----------------------------------------
+                     214    
+24B4 7443            215                    mov     A,#43H                  ;Set next variable to value
+24B6 020030          216                    ljmp    30H                     ;on argument stack and
+                     217                                                    ;return to BASIC.
+                     218    
+                     219    ;----- delay - generates a delay of 4 machine cycles ------------------------
+                     220    
+24B9 22              221    delay:          ret                             ;4 cycles for CALL and RET.
+                     222    
+                     223    ;----- SCLhigh - sends SCL pin high and waits for any clock stretching ------
+                     224    
+24BA 7F04            225    SCLhigh:        mov     R7,#4                   ;Load time out counter.
+24BC D295            226    setSCL:         setb    SCL                     ;Set SCL to high.
+I2C-SFR                                                                                                       PAGE 5
+
+24BE 209505          227                    jb      SCL,quit                ;If SCL actually high return.
+24C1 DFF9            228                    djnz    R7,setSCL               ;If not try until R7 is zero.
+24C3 431802          229                    orl     status,#tout            ;Set status time out.
+24C6 22              230    quit:           ret
+                     231    
+                     232    ;----- error - sends an error message to the terminal -----------------------
+                     233    
+24C7 7407            234    i2cerror:       mov     A,#7                    ;Send CR/LF
+24C9 120030          235                    lcall   30H
+24CC 7B24            236                    mov     R3,#high i2cerrmsg      ;Set string address.
+24CE 79DB            237                    mov     R1,#low i2cerrmsg
+24D0 D234            238    error:          setb    34H                     ;Read string from code memory.
+24D2 7406            239                    mov     A,#6                    ;Send String to
+24D4 120030          240                    lcall   30H                     ;terminal.
+24D7 E4              241                    clr     A
+24D8 020030          242                    ljmp    30H                     ;Back to command mode.
+                     243    
+24DB 4552524F        244    i2cerrmsg:      db 'ERROR: BAD I2CPUT ARGUMENT'
+24DF 523A2042   
+24E3 41442049   
+24E7 32435055   
+24EB 54204152   
+24EF 47554D45   
+24F3 4E54       
+24F5 22              245                    db      22H                     ;End of text.   
+                     246    
+24F6 4552524F        247    sfrerrmsg:      db 'ERROR: BAD SFR ARGUMENT'
+24FA 523A2042   
+24FE 41442053   
+2502 46522041   
+2506 5247554D   
+250A 454E54     
+250D 22              248                    db      22H                     ;End of text.
+                     249    
+250E 7407            250    sfrerror:       mov     A,#7                    ;Send CR/LF
+2510 120030          251                    lcall   30H
+2513 7B24            252                    mov     R3,#high sfrerrmsg      ;Set string address.
+2515 79F6            253                    mov     R1,#low sfrerrmsg
+2517 80B7            254                    sjmp    error
+                     255    
+                     256    ;===== rdsfr - read from special funtion register ==========================
+                     257    
+2519 7439            258    rdsfr:          mov     A,#39H                  ;Put address from text to
+251B 120030          259                    lcall   30H                     ;argument stack.
+                     260    
+251E 7401            261                    mov     A,#1                    ;change value to 16 bit
+2520 120030          262                    lcall   30H                     ;integer and write to R3:R1
+                     263    
+2523 BB00E8          264                    cjne    R3,#0,sfrerror          ;If R3 not zero then error.
+2526 E9              265                    mov     A,R1                    ;Address to Acc.
+2527 30E7E4          266                    jnb     Acc.7,sfrerror          ;If address less then 80H! 
+252A FC              267                    mov     R4,A                    ;Address to R4.
+                     268    
+252B 758288          269                    mov     DPL,#low sfrgettab      ;Set DPTR to jump
+252E 758325          270                    mov     DPH,#high sfrgettab     ;table.
+2531 122569          271                    call    do_sfr                  ;Read SFR.
+                     272    
+2534 F8              273                    mov     R0,A                    ;Load R0 with SFR byte.
+I2C-SFR                                                                                                       PAGE 6
+
+2535 7A00            274                    mov     R2,#0                   ;Set high byte to zero.
+2537 749A            275                    mov     A,#9AH                  ;Put byte on argument stack
+2539 120030          276                    lcall   30H
+                     277    
+                     278    ;----- Set variable to SFR byte ---------------------------------------------
+                     279    
+253C 7443            280                    mov     A,#43H                  ;Set next variable to value
+253E 020030          281                    ljmp    30H                     ;on argument stack and
+                     282                                                    ;return to BASIC.
+                     283    
+                     284    ;===== wrsfr - write to special funtion register ============================
+                     285    
+2541 7439            286    wrsfr:          mov     A,#39H                  ;Put address from text to
+2543 120030          287                    lcall   30H                     ;argument stack.
+                     288    
+2546 7401            289                    mov     A,#1                    ;change value to 16 bit
+2548 120030          290                    lcall   30H                     ;integer and write to R3:R1
+254B BB00C0          291                    cjne    R3,#0,sfrerror          ;If R3 not zero then error
+254E E9              292                    mov     A,R1                    ;or
+254F 30E7BC          293                    jnb     Acc.7,sfrerror          ;if address less then 80H! 
+2552 890B            294                    mov     temp1,R1                ;Save address.
+                     295    
+2554 7439            296                    mov     A,#39H                  ;Put value to write on
+2556 120030          297                    lcall   30H                     ;argument stack.
+                     298    
+2559 7401            299                    mov     A,#1                    ;change value to 16 bit
+255B 120030          300                    lcall   30H                     ;integer and write to R3:R1
+255E BB00AD          301                    cjne    R3,#0,sfrerror          ;If R3 not zero then 
+                     302                                                    ;8 bit integer only error.
+2561 758286          303                    mov     DPL,#low sfrputtab      ;Set DPTR to jump
+2564 758325          304                    mov     DPH,#high sfrputtab     ;table.
+2567 AC0B            305                    mov     R4,temp1                ;Address to write to R4.
+                     306    
+                     307    ;----- do_sfr - read from or wright to SFR ----------------------------------
+                     308    
+                     309    ;----- Calculate the jump ---------------------------------------------------
+                     310    
+2569 EC              311    do_sfr:         mov     A,R4                    ;Address to Acc
+256A 2480            312                    add     A,#80H
+256C FC              313                    mov     R4,A
+256D 7800            314                    mov     R0,#0
+256F 25E0            315                    add     A,ACC                   ;*2
+2571 C8              316                    xch     A,R0
+2572 35E0            317                    addc    A,ACC                   ;carry
+2574 C8              318                    xch     A,R0
+2575 25E0            319                    add     A,ACC                   ;*4
+2577 C8              320                    xch     A,R0
+2578 35E0            321                    addc    A,ACC                   ;carry
+257A C8              322                    xch     A,R0
+                     323    
+                     324    ;----- Load DPTR with offset and jump ---------------------------------------
+                     325    
+257B 2582            326                    add     A,DPL
+257D F582            327                    mov     DPL,A
+257F E8              328                    mov     A,R0
+2580 3583            329                    addc    A,DPH
+2582 F583            330                    mov     DPH,A
+2584 EC              331                    mov     A,R4
+I2C-SFR                                                                                                       PAGE 7
+
+2585 73              332                    jmp     @A+DPTR                 ;Jump into table.
+                     333    
+                     334    ;----- The direct addressing table ------------------------------------------
+                     335    
+2586 8980            336    sfrputtab:      mov     128,R1
+2588 E580            337    sfrgettab:      mov     A,128
+258A 22              338                    ret
+258B 8981            339                    mov     129,R1
+258D E581            340                    mov     A,129
+258F 22              341                    ret
+2590 8982            342                    mov     130,R1
+2592 E582            343                    mov     A,130
+2594 22              344                    ret
+2595 8983            345                    mov     131,R1
+2597 E583            346                    mov     A,131
+2599 22              347                    ret
+259A 8984            348                    mov     132,R1
+259C E584            349                    mov     A,132
+259E 22              350                    ret
+259F 8985            351                    mov     133,R1
+25A1 E585            352                    mov     A,133
+25A3 22              353                    ret
+25A4 8986            354                    mov     134,R1
+25A6 E586            355                    mov     A,134
+25A8 22              356                    ret
+25A9 8987            357                    mov     135,R1
+25AB E587            358                    mov     A,135
+25AD 22              359                    ret
+25AE 8988            360                    mov     136,R1
+25B0 E588            361                    mov     A,136
+25B2 22              362                    ret
+25B3 8989            363                    mov     137,R1
+25B5 E589            364                    mov     A,137
+25B7 22              365                    ret
+25B8 898A            366                    mov     138,R1
+25BA E58A            367                    mov     A,138
+25BC 22              368                    ret
+25BD 898B            369                    mov     139,R1
+25BF E58B            370                    mov     A,139
+25C1 22              371                    ret
+25C2 898C            372                    mov     140,R1
+25C4 E58C            373                    mov     A,140
+25C6 22              374                    ret
+25C7 898D            375                    mov     141,R1
+25C9 E58D            376                    mov     A,141
+25CB 22              377                    ret
+25CC 898E            378                    mov     142,R1
+25CE E58E            379                    mov     A,142
+25D0 22              380                    ret
+25D1 898F            381                    mov     143,R1
+25D3 E58F            382                    mov     A,143
+25D5 22              383                    ret
+25D6 8990            384                    mov     144,R1
+25D8 E590            385                    mov     A,144
+25DA 22              386                    ret
+25DB 8991            387                    mov     145,R1
+25DD E591            388                    mov     A,145
+25DF 22              389                    ret
+I2C-SFR                                                                                                       PAGE 8
+
+25E0 8992            390                    mov     146,R1
+25E2 E592            391                    mov     A,146
+25E4 22              392                    ret
+25E5 8993            393                    mov     147,R1
+25E7 E593            394                    mov     A,147
+25E9 22              395                    ret
+25EA 8994            396                    mov     148,R1
+25EC E594            397                    mov     A,148
+25EE 22              398                    ret
+25EF 8995            399                    mov     149,R1
+25F1 E595            400                    mov     A,149
+25F3 22              401                    ret
+25F4 8996            402                    mov     150,R1
+25F6 E596            403                    mov     A,150
+25F8 22              404                    ret
+25F9 8997            405                    mov     151,R1
+25FB E597            406                    mov     A,151
+25FD 22              407                    ret
+25FE 8998            408                    mov     152,R1
+2600 E598            409                    mov     A,152
+2602 22              410                    ret
+2603 8999            411                    mov     153,R1
+2605 E599            412                    mov     A,153
+2607 22              413                    ret
+2608 899A            414                    mov     154,R1
+260A E59A            415                    mov     A,154
+260C 22              416                    ret
+260D 899B            417                    mov     155,R1
+260F E59B            418                    mov     A,155
+2611 22              419                    ret
+2612 899C            420                    mov     156,R1
+2614 E59C            421                    mov     A,156
+2616 22              422                    ret
+2617 899D            423                    mov     157,R1
+2619 E59D            424                    mov     A,157
+261B 22              425                    ret
+261C 899E            426                    mov     158,R1
+261E E59E            427                    mov     A,158
+2620 22              428                    ret
+2621 899F            429                    mov     159,R1
+2623 E59F            430                    mov     A,159
+2625 22              431                    ret
+2626 89A0            432                    mov     160,R1
+2628 E5A0            433                    mov     A,160
+262A 22              434                    ret
+262B 89A1            435                    mov     161,R1
+262D E5A1            436                    mov     A,161
+262F 22              437                    ret
+2630 89A2            438                    mov     162,R1
+2632 E5A2            439                    mov     A,162
+2634 22              440                    ret
+2635 89A3            441                    mov     163,R1
+2637 E5A3            442                    mov     A,163
+2639 22              443                    ret
+263A 89A4            444                    mov     164,R1
+263C E5A4            445                    mov     A,164
+263E 22              446                    ret
+263F 89A5            447                    mov     165,R1
+I2C-SFR                                                                                                       PAGE 9
+
+2641 E5A5            448                    mov     A,165
+2643 22              449                    ret
+2644 89A6            450                    mov     166,R1
+2646 E5A6            451                    mov     A,166
+2648 22              452                    ret
+2649 89A7            453                    mov     167,R1
+264B E5A7            454                    mov     A,167
+264D 22              455                    ret
+264E 89A8            456                    mov     168,R1
+2650 E5A8            457                    mov     A,168
+2652 22              458                    ret
+2653 89A9            459                    mov     169,R1
+2655 E5A9            460                    mov     A,169
+2657 22              461                    ret
+2658 89AA            462                    mov     170,R1
+265A E5AA            463                    mov     A,170
+265C 22              464                    ret
+265D 89AB            465                    mov     171,R1
+265F E5AB            466                    mov     A,171
+2661 22              467                    ret
+2662 89AC            468                    mov     172,R1
+2664 E5AC            469                    mov     A,172
+2666 22              470                    ret
+2667 89AD            471                    mov     173,R1
+2669 E5AD            472                    mov     A,173
+266B 22              473                    ret
+266C 89AE            474                    mov     174,R1
+266E E5AE            475                    mov     A,174
+2670 22              476                    ret
+2671 89AF            477                    mov     175,R1
+2673 E5AF            478                    mov     A,175
+2675 22              479                    ret
+2676 89B0            480                    mov     176,R1
+2678 E5B0            481                    mov     A,176
+267A 22              482                    ret
+267B 89B1            483                    mov     177,R1
+267D E5B1            484                    mov     A,177
+267F 22              485                    ret
+2680 89B2            486                    mov     178,R1
+2682 E5B2            487                    mov     A,178
+2684 22              488                    ret
+2685 89B3            489                    mov     179,R1
+2687 E5B3            490                    mov     A,179
+2689 22              491                    ret
+268A 89B4            492                    mov     180,R1
+268C E5B4            493                    mov     A,180
+268E 22              494                    ret
+268F 89B5            495                    mov     181,R1
+2691 E5B5            496                    mov     A,181
+2693 22              497                    ret
+2694 89B6            498                    mov     182,R1
+2696 E5B6            499                    mov     A,182
+2698 22              500                    ret
+2699 89B7            501                    mov     183,R1
+269B E5B7            502                    mov     A,183
+269D 22              503                    ret
+269E 89B8            504                    mov     184,R1
+26A0 E5B8            505                    mov     A,184
+I2C-SFR                                                                                                       PAGE 10
+
+26A2 22              506                    ret
+26A3 89B9            507                    mov     185,R1
+26A5 E5B9            508                    mov     A,185
+26A7 22              509                    ret
+26A8 89BA            510                    mov     186,R1
+26AA E5BA            511                    mov     A,186
+26AC 22              512                    ret
+26AD 89BB            513                    mov     187,R1
+26AF E5BB            514                    mov     A,187
+26B1 22              515                    ret
+26B2 89BC            516                    mov     188,R1
+26B4 E5BC            517                    mov     A,188
+26B6 22              518                    ret
+26B7 89BD            519                    mov     189,R1
+26B9 E5BD            520                    mov     A,189
+26BB 22              521                    ret
+26BC 89BE            522                    mov     190,R1
+26BE E5BE            523                    mov     A,190
+26C0 22              524                    ret
+26C1 89BF            525                    mov     191,R1
+26C3 E5BF            526                    mov     A,191
+26C5 22              527                    ret
+26C6 89C0            528                    mov     192,R1
+26C8 E5C0            529                    mov     A,192
+26CA 22              530                    ret
+26CB 89C1            531                    mov     193,R1
+26CD E5C1            532                    mov     A,193
+26CF 22              533                    ret
+26D0 89C2            534                    mov     194,R1
+26D2 E5C2            535                    mov     A,194
+26D4 22              536                    ret
+26D5 89C3            537                    mov     195,R1
+26D7 E5C3            538                    mov     A,195
+26D9 22              539                    ret
+26DA 89C4            540                    mov     196,R1
+26DC E5C4            541                    mov     A,196
+26DE 22              542                    ret
+26DF 89C5            543                    mov     197,R1
+26E1 E5C5            544                    mov     A,197
+26E3 22              545                    ret
+26E4 89C6            546                    mov     198,R1
+26E6 E5C6            547                    mov     A,198
+26E8 22              548                    ret
+26E9 89C7            549                    mov     199,R1
+26EB E5C7            550                    mov     A,199
+26ED 22              551                    ret
+26EE 89C8            552                    mov     200,R1
+26F0 E5C8            553                    mov     A,200
+26F2 22              554                    ret
+26F3 89C9            555                    mov     201,R1
+26F5 E5C9            556                    mov     A,201
+26F7 22              557                    ret
+26F8 89CA            558                    mov     202,R1
+26FA E5CA            559                    mov     A,202
+26FC 22              560                    ret
+26FD 89CB            561                    mov     203,R1
+26FF E5CB            562                    mov     A,203
+2701 22              563                    ret
+I2C-SFR                                                                                                       PAGE 11
+
+2702 89CC            564                    mov     204,R1
+2704 E5CC            565                    mov     A,204
+2706 22              566                    ret
+2707 89CD            567                    mov     205,R1
+2709 E5CD            568                    mov     A,205
+270B 22              569                    ret
+270C 89CE            570                    mov     206,R1
+270E E5CE            571                    mov     A,206
+2710 22              572                    ret
+2711 89CF            573                    mov     207,R1
+2713 E5CF            574                    mov     A,207
+2715 22              575                    ret
+2716 89D0            576                    mov     208,R1
+2718 E5D0            577                    mov     A,208
+271A 22              578                    ret
+271B 89D1            579                    mov     209,R1
+271D E5D1            580                    mov     A,209
+271F 22              581                    ret
+2720 89D2            582                    mov     210,R1
+2722 E5D2            583                    mov     A,210
+2724 22              584                    ret
+2725 89D3            585                    mov     211,R1
+2727 E5D3            586                    mov     A,211
+2729 22              587                    ret
+272A 89D4            588                    mov     212,R1
+272C E5D4            589                    mov     A,212
+272E 22              590                    ret
+272F 89D5            591                    mov     213,R1
+2731 E5D5            592                    mov     A,213
+2733 22              593                    ret
+2734 89D6            594                    mov     214,R1
+2736 E5D6            595                    mov     A,214
+2738 22              596                    ret
+2739 89D7            597                    mov     215,R1
+273B E5D7            598                    mov     A,215
+273D 22              599                    ret
+273E 89D8            600                    mov     216,R1
+2740 E5D8            601                    mov     A,216
+2742 22              602                    ret
+2743 89D9            603                    mov     217,R1
+2745 E5D9            604                    mov     A,217
+2747 22              605                    ret
+2748 89DA            606                    mov     218,R1
+274A E5DA            607                    mov     A,218
+274C 22              608                    ret
+274D 89DB            609                    mov     219,R1
+274F E5DB            610                    mov     A,219
+2751 22              611                    ret
+2752 89DC            612                    mov     220,R1
+2754 E5DC            613                    mov     A,220
+2756 22              614                    ret
+2757 89DD            615                    mov     221,R1
+2759 E5DD            616                    mov     A,221
+275B 22              617                    ret
+275C 89DE            618                    mov     222,R1
+275E E5DE            619                    mov     A,222
+2760 22              620                    ret
+2761 89DF            621                    mov     223,R1
+I2C-SFR                                                                                                       PAGE 12
+
+2763 E5DF            622                    mov     A,223
+2765 22              623                    ret
+2766 89E0            624                    mov     224,R1
+2768 E5E0            625                    mov     A,224
+276A 22              626                    ret
+276B 89E1            627                    mov     225,R1
+276D E5E1            628                    mov     A,225
+276F 22              629                    ret
+2770 89E2            630                    mov     226,R1
+2772 E5E2            631                    mov     A,226
+2774 22              632                    ret
+2775 89E3            633                    mov     227,R1
+2777 E5E3            634                    mov     A,227
+2779 22              635                    ret
+277A 89E4            636                    mov     228,R1
+277C E5E4            637                    mov     A,228
+277E 22              638                    ret
+277F 89E5            639                    mov     229,R1
+2781 E5E5            640                    mov     A,229
+2783 22              641                    ret
+2784 89E6            642                    mov     230,R1
+2786 E5E6            643                    mov     A,230
+2788 22              644                    ret
+2789 89E7            645                    mov     231,R1
+278B E5E7            646                    mov     A,231
+278D 22              647                    ret
+278E 89E8            648                    mov     232,R1
+2790 E5E8            649                    mov     A,232
+2792 22              650                    ret
+2793 89E9            651                    mov     233,R1
+2795 E5E9            652                    mov     A,233
+2797 22              653                    ret
+2798 89EA            654                    mov     234,R1
+279A E5EA            655                    mov     A,234
+279C 22              656                    ret
+279D 89EB            657                    mov     235,R1
+279F E5EB            658                    mov     A,235
+27A1 22              659                    ret
+27A2 89EC            660                    mov     236,R1
+27A4 E5EC            661                    mov     A,236
+27A6 22              662                    ret
+27A7 89ED            663                    mov     237,R1
+27A9 E5ED            664                    mov     A,237
+27AB 22              665                    ret
+27AC 89EE            666                    mov     238,R1
+27AE E5EE            667                    mov     A,238
+27B0 22              668                    ret
+27B1 89EF            669                    mov     239,R1
+27B3 E5EF            670                    mov     A,239
+27B5 22              671                    ret
+27B6 89F0            672                    mov     240,R1
+27B8 E5F0            673                    mov     A,240
+27BA 22              674                    ret
+27BB 89F1            675                    mov     241,R1
+27BD E5F1            676                    mov     A,241
+27BF 22              677                    ret
+27C0 89F2            678                    mov     242,R1
+27C2 E5F2            679                    mov     A,242
+I2C-SFR                                                                                                       PAGE 13
+
+27C4 22              680                    ret
+27C5 89F3            681                    mov     243,R1
+27C7 E5F3            682                    mov     A,243
+27C9 22              683                    ret
+27CA 89F4            684                    mov     244,R1
+27CC E5F4            685                    mov     A,244
+27CE 22              686                    ret
+27CF 89F5            687                    mov     245,R1
+27D1 E5F5            688                    mov     A,245
+27D3 22              689                    ret
+27D4 89F6            690                    mov     246,R1
+27D6 E5F6            691                    mov     A,246
+27D8 22              692                    ret
+27D9 89F7            693                    mov     247,R1
+27DB E5F7            694                    mov     A,247
+27DD 22              695                    ret
+27DE 89F8            696                    mov     248,R1
+27E0 E5F8            697                    mov     A,248
+27E2 22              698                    ret
+27E3 89F9            699                    mov     249,R1
+27E5 E5F9            700                    mov     A,249
+27E7 22              701                    ret
+27E8 89FA            702                    mov     250,R1
+27EA E5FA            703                    mov     A,250
+27EC 22              704                    ret
+27ED 89FB            705                    mov     251,R1
+27EF E5FB            706                    mov     A,251
+27F1 22              707                    ret
+27F2 89FC            708                    mov     252,R1
+27F4 E5FC            709                    mov     A,252
+27F6 22              710                    ret
+27F7 89FD            711                    mov     253,R1
+27F9 E5FD            712                    mov     A,253
+27FB 22              713                    ret
+27FC 89FE            714                    mov     254,R1
+27FE E5FE            715                    mov     A,254
+2800 22              716                    ret
+2801 89FF            717                    mov     255,R1
+2803 E5FF            718                    mov     A,255
+2805 22              719                    ret
+                     720    
+                     721    ;----------------------------------------------------------------------------
+                     722    
+                     723                    end
+                     724    
+
+VERSION 1.2h ASSEMBLY COMPLETE, 0 ERRORS FOUND
+I2C-SFR                                                                                                       PAGE 14
+
+ACC. . . . . . . . . . . . . . .  D ADDR  00E0H  PREDEFINED  
+ACKOK. . . . . . . . . . . . . .  C ADDR  248FH  
+BUSY . . . . . . . . . . . . . .    NUMB  0004H  
+DELAY. . . . . . . . . . . . . .  C ADDR  24B9H  
+DO_SFR . . . . . . . . . . . . .  C ADDR  2569H  
+DPH. . . . . . . . . . . . . . .  D ADDR  0083H  PREDEFINED  
+DPL. . . . . . . . . . . . . . .  D ADDR  0082H  PREDEFINED  
+ERROR. . . . . . . . . . . . . .  C ADDR  24D0H  
+I2CERRMSG. . . . . . . . . . . .  C ADDR  24DBH  
+I2CERROR . . . . . . . . . . . .  C ADDR  24C7H  
+I2CGET . . . . . . . . . . . . .  C ADDR  2492H  
+I2CPUT . . . . . . . . . . . . .  C ADDR  2462H  
+I2CSTART . . . . . . . . . . . .  C ADDR  2440H  
+I2CSTOP. . . . . . . . . . . . .  C ADDR  2456H  
+ISHIGH . . . . . . . . . . . . .  C ADDR  2450H  
+NACK . . . . . . . . . . . . . .    NUMB  0008H  
+P1 . . . . . . . . . . . . . . .  D ADDR  0090H  PREDEFINED  
+QUIT . . . . . . . . . . . . . .  C ADDR  24C6H  
+RDSFR. . . . . . . . . . . . . .  C ADDR  2519H  
+READ . . . . . . . . . . . . . .  C ADDR  2494H  
+SCL. . . . . . . . . . . . . . .  B ADDR  0095H  
+SCLHIGH. . . . . . . . . . . . .  C ADDR  24BAH  
+SDA. . . . . . . . . . . . . . .  B ADDR  0096H  
+SEND . . . . . . . . . . . . . .  C ADDR  2472H  
+SETSCL . . . . . . . . . . . . .  C ADDR  24BCH  
+SETSDA . . . . . . . . . . . . .  C ADDR  2445H  
+SFRERRMSG. . . . . . . . . . . .  C ADDR  24F6H  
+SFRERROR . . . . . . . . . . . .  C ADDR  250EH  
+SFRGETTAB. . . . . . . . . . . .  C ADDR  2588H  
+SFRPUTTAB. . . . . . . . . . . .  C ADDR  2586H  
+STATUS . . . . . . . . . . . . .    NUMB  0018H  
+TEMP1. . . . . . . . . . . . . .    NUMB  000BH  
+TOKENTABLE . . . . . . . . . . .  C ADDR  240CH  
+TOUT . . . . . . . . . . . . . .    NUMB  0002H  
+VECTORTABLE. . . . . . . . . . .  C ADDR  2400H  
+WRSFR. . . . . . . . . . . . . .  C ADDR  2541H  
+XBIT . . . . . . . . . . . . . .  B ADDR  002DH  
