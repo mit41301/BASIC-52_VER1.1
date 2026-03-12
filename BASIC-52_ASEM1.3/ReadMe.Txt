@@ -1,8 +1,10 @@
-Assembled the *.SRC files using ASEM-51 Ver 1.3 assembler using DOSBox 0.74-3 under Windows 11
+Assembled the *.SRC files using ASEM-51 V1.3 assembler using DOSBox 0.74-3 under Windows 11
 There are 2 HEX files generated. Those files should be merged together to produce the final HEX file.
 We can also save the final HEX file into a BIN file from any compatible programmer software.
 
 http://plit.de/asem-51/final13.htm
+
+
 
 af46369883f21003adbe4148173dee5a *asem51-1.3-1.i386.rpm  
 8850d5349391314a07b4e4bf4ab218a2 *asem51-1.3b3-2.i386.rpm  
