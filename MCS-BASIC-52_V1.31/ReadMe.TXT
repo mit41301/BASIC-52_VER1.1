@@ -183,3 +183,52 @@
 ;
 ; H.-J. Boehling, D. Wulf 11/26/2001
 ;*****************************************************************************
+
+
+## I2C SFR
+
+
+;****************************************************************************
+;*                        BASIC-52 V1.31 enhancements                       *
+;*          The following code enhanced BASIC-52 with new commands          *
+;*               for I2C communicatin and read / write to SFR               *
+;*--------------------------------------------------------------------------*
+;* (C) H.-J. Boehling & D. Wulf 14.11.01                                    *
+;*     http://home.arcor.de/h.boehling                                      *
+;*     H-Boehling@gmx.de                                                    *
+;****************************************************************************
+;*
+;* Four new I2C communication commands as I2C-bus master.
+;*
+;* The syntax to use is:
+;*
+;*     I2CSTART           Sends a start condition to I2C bus.
+;*                        - Returns with busy, time out or status clear.  
+;*     I2CSTOP            Sends a stop condition to I2C bus.
+;*                        - Returns with time out or status clear.
+;*     I2CPUT [byte]      Sends a byte to the I2C bus.
+;*                        - Returns with time out, no acknowledge or clear.
+;*     I2CGET [variable]  Reads a byte from I2C to a BASIC variable.
+;*                        - Set 18H (status) to 1 to send no acknowledge:
+;*                           DBY(18H) = 1 : I2CGET B : I2CSTOP : PRINT B
+;*                        - Returns with time out or status clear. 
+;*   
+;* Register 18H is the I2C communication status register; useage is:
+;*
+;*     STATUS=DBY(18H)
+;*      IF STATUS.AND.2=2 PRINT "Time out error!"
+;*      IF STATUS.AND.4=4 PRINT "Busy error!"
+;*      IF STATUS.AND.8=8 PRINT "No acknowlege error!"
+;*
+;*---------------------------------------------------------------------------
+;*
+;* Two new commands to read from or write to a special funkton register:
+;*
+;*     WRSFR ([address]) [byte]      Writes to a special funkton register.
+;*
+;*     RDSFR ([address]) [variable]  Reads from a special funkton register.
+;*
+;* [address] is the address of the SFR and had to be a value between 
+;* 128 (080H) and 255 (0FFH).
+;*
+;****************************************************************************
